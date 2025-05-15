@@ -12,10 +12,10 @@
 
 /* States in a thread's life cycle. */
 enum thread_status {
-	THREAD_RUNNING,     /* Running thread. */
-	THREAD_READY,       /* Not running but ready to run. */
-	THREAD_BLOCKED,     /* Waiting for an event to trigger. */
-	THREAD_DYING        /* About to be destroyed. */
+	THREAD_RUNNING,     /* Running thread. 함수 내 0으로 처리 */
+	THREAD_READY,       /* Not running but ready to run. 함수 내 1으로 처리 */
+	THREAD_BLOCKED,     /* Waiting for an event to trigger. 함수 내 2으로 처리 */
+	THREAD_DYING        /* About to be destroyed. 함수 내 3으로 처리*/
 };
 
 /* Thread identifier type.

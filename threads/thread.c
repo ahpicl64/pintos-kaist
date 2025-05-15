@@ -62,6 +62,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+static bool ready_list_comp(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -207,6 +208,9 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	if (t->priority >= thread_current()->priority)
+		thread_yield();
+
 	return tid;
 }
 
@@ -238,9 +242,9 @@ thread_unblock (struct thread *t) {
 
 	ASSERT (is_thread (t));
 
-	old_level = intr_disable ();
-	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	old_level = intr_disable();
+	ASSERT(t->status == THREAD_BLOCKED);
+	list_insert_ordered(&ready_list, &t->elem, ready_list_comp, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -292,6 +296,20 @@ thread_exit (void) {
 	NOT_REACHED ();
 }
 
+static bool
+ready_list_comp(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
+{
+	struct thread* thread_a = list_entry(a, struct thread, elem);
+	struct thread* thread_b = list_entry(b, struct thread, elem);
+
+	if (thread_a == NULL || thread_b == NULL)
+		return false;
+
+	if (thread_a->priority != thread_b->priority)
+		return thread_a->priority > thread_b->priority;
+
+	return thread_a->tid < thread_b->tid; // 동일 우선순위면 tid 작은(먼저 생성) 스레드 우선
+}
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void
@@ -303,7 +321,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+        list_insert_ordered(&ready_list, &curr->elem, ready_list_comp, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -311,7 +329,21 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
+	enum intr_level old_level = intr_disable ();
+
 	thread_current ()->priority = new_priority;
+	/* 변경이 필요 없는 경우(즉, yield 할 필요 없는 경우)
+	 * 1. 대기 리스트가 비어있고
+	 * 2. 대기 리스트의 제일 앞이(우선순위 순으로 정렬되었다는 가정 하) 현재 우선순위보다 낮을경우
+	 * 그 외에는 새로운 우선순위가 낮아질 때 yield 호출해서 현재 점유하던 cpu 자원에서 빠짐*/
+	if (list_empty (&ready_list))
+		return;
+	struct thread* next = list_entry(list_front(&ready_list), struct thread, elem);
+
+	if (thread_get_priority() < next->priority)
+		thread_yield ();
+
+	intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */

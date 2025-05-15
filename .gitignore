@@ -65,3 +65,12 @@ dkms.conf
 
 # Clion cmake build file
 CMakeLists.txt
+
+# make file
+Makefile
+
+# git file
+.gitignore
+
+# build file
+/threads/build/
