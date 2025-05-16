@@ -59,14 +59,15 @@ sema_init (struct semaphore *sema, unsigned value) {
    sema_down function. */
 void
 sema_down (struct semaphore *sema) {
-	enum intr_level old_level;
 
 	ASSERT (sema != NULL);
 	ASSERT (!intr_context ());
 
-	old_level = intr_disable ();
+	enum intr_level old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		// lock 리스트 waiters에 우선순위 정렬
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, compare_priority, NULL);
+		// list_push_back (&sema->waiters, &thread_current ()->elem); // 기존 코드, 정렬 없이 리스트 waiters에 push back
 		thread_block ();
 	}
 	sema->value--;
@@ -184,12 +185,29 @@ lock_init (struct lock *lock) {
    we need to sleep. */
 void
 lock_acquire (struct lock *lock) {
-	ASSERT (lock != NULL);
-	ASSERT (!intr_context ());
-	ASSERT (!lock_held_by_current_thread (lock));
+	struct thread *curr = thread_current();
+
+	ASSERT(lock != NULL);
+	ASSERT(!intr_context ());
+	ASSERT(!lock_held_by_current_thread (lock));
+
+	enum intr_level old_level = intr_disable ();
+	struct thread *holder = lock->holder;
+
+	curr->wait_lock = lock;	// 스레드가 필요로 하는 락을 구조체의 wait_lock에 저장함
+
+	if (holder && holder->priority < curr->priority) // 현재 락을 갖고있는 스레드가 우선순위가 낮으면, 기부로 넘어감
+	{
+		// list_insert_ordered(&lock->holder->donors_list, &curr->elem, compare_priority, NULL);
+		holder->priority = curr->priority; // 우선순위 기부
+	}
+
 
 	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+
+	curr->wait_lock = NULL;
+	lock->holder = curr;
+	intr_set_level (old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -222,8 +240,17 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	enum intr_level old_level = intr_disable ();
+	struct thread *curr = thread_current();
+
+
+	curr->priority = curr->original_priority;
+
 	lock->holder = NULL;
+
 	sema_up (&lock->semaphore);
+	thread_yield();
+	intr_set_level (old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false

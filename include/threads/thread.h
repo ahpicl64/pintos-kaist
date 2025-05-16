@@ -91,6 +91,9 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int original_priority;		// 기증 받기 전 원래 우선순위를 저장할 필드
+	struct lock *wait_lock;		// 해당 스레드가 획득을 기다리는 락. 이 락을 가지고 있는 스레드에게 우선순위를 기증하게됨
+	struct list donors_list;
 	int64_t wakeup_tick;		// 깨어날 시간을 저장할 필드
 
 	/* Shared between thread.c and synch.c. */
@@ -133,6 +136,9 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+
+bool compare_priority(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED);
+void update_effective_priority(struct thread* t);
 
 int thread_get_priority (void);
 void thread_set_priority (int);

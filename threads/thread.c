@@ -62,7 +62,6 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
-static bool ready_list_comp(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -244,7 +243,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable();
 	ASSERT(t->status == THREAD_BLOCKED);
-	list_insert_ordered(&ready_list, &t->elem, ready_list_comp, NULL);
+	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -296,8 +295,8 @@ thread_exit (void) {
 	NOT_REACHED ();
 }
 
-static bool
-ready_list_comp(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
+bool
+compare_priority(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
 {
 	struct thread* thread_a = list_entry(a, struct thread, elem);
 	struct thread* thread_b = list_entry(b, struct thread, elem);
@@ -315,7 +314,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread) {
-		list_insert_ordered(&ready_list, &curr->elem, ready_list_comp, NULL); // Pintos 기본 방식
+		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL); // Pintos 기본 방식
 	}
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
@@ -438,6 +437,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	// donation 구현 위한 초기화 추가
+	t->original_priority = priority;
+	t->wait_lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
