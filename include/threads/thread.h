@@ -93,11 +93,13 @@ struct thread {
 	int priority;                       /* Priority. */
 	int original_priority;		// 기증 받기 전 원래 우선순위를 저장할 필드
 	struct lock *wait_lock;		// 해당 스레드가 획득을 기다리는 락. 이 락을 가지고 있는 스레드에게 우선순위를 기증하게됨
-	struct list donors_list;
 	int64_t wakeup_tick;		// 깨어날 시간을 저장할 필드
+
+	struct list donors_list; // 우선순위를 기부한 스레드들을 저장. 우선순위가 큰 애들이 앞으로 옴.
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem donors;	// 기부자 리스트를 쓰기위한 element 요소 생성
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -138,6 +140,7 @@ void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 
 bool compare_priority(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED);
+bool compare_donor_priority(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED);
 void update_effective_priority(struct thread* t);
 
 int thread_get_priority (void);

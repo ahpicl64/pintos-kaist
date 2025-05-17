@@ -72,5 +72,8 @@ Makefile
 # git file
 .gitignore
 
+# backup.c
+*_backup.c
+
 # build file
 /threads/build/

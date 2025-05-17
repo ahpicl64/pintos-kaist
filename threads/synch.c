@@ -200,11 +200,15 @@ lock_acquire (struct lock *lock) {
 	{
 		// list_insert_ordered(&lock->holder->donors_list, &curr->elem, compare_priority, NULL);
 		holder->priority = curr->priority; // 우선순위 기부
+		curr->donors.prev = NULL; // 추가
+		curr->donors.next = NULL; // 추가
+		// 디버깅용 우선순위 순으로 입력
+		list_insert_ordered(&holder->donors_list, &curr->donors, compare_donor_priority, NULL);
+		// 락에게 기부한 스레드들의 정보를 리스트 가장 앞에 넣음. 락을 가지고있는 스레드는 계속 앞만 보면, 가장 우선순위 높은 것만 처리하게됨.
+		// list_push_front(&holder->donors_list, &curr->donors);
 	}
 
-
 	sema_down (&lock->semaphore);
-
 	curr->wait_lock = NULL;
 	lock->holder = curr;
 	intr_set_level (old_level);
@@ -235,6 +239,7 @@ lock_try_acquire (struct lock *lock) {
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to release a lock within an interrupt
    handler. */
+
 void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
@@ -243,8 +248,38 @@ lock_release (struct lock *lock) {
 	enum intr_level old_level = intr_disable ();
 	struct thread *curr = thread_current();
 
+	curr->priority = curr->original_priority; // 유효 우선순위를 원래 우선순위로 복구
 
-	curr->priority = curr->original_priority;
+	struct list_elem *e = list_begin(&curr->donors_list);
+	// 현재 종료하려는 작업의 락과, 기증자 리스트 내의 기다리는 락을 비교해서 일치하면 해당 스레드만 기부자리스트에서 삭제
+	while (e != list_end(&curr->donors_list))
+	{
+		struct thread *t = list_entry (e, struct thread, donors);
+		e = list_next (e);
+		if (t->wait_lock == lock)
+			list_remove(&t->donors);
+	}
+
+	// 남아있는 기부자중 가장 큰 우선순위를 찾아서 반영
+	for (e = list_begin(&curr->donors_list); e != list_end(&curr->donors_list); e = list_next(e))
+	{
+		struct thread *t = list_entry (e, struct thread, donors);
+		if (t->priority > curr->priority)
+			curr->priority = t->priority;
+	}
+
+	// 기존 코드 (항상 우선순위 순으로 정렬되어있다고 가정하고 앞의 리스트 내 요소를 pop으로 지움)
+	// if (!list_empty(&curr->donors_list))
+	// {
+	// 	list_sort(&curr->donors_list, compare_donor_priority, NULL); // 정렬
+	// 	list_pop_front(&curr->donors_list);
+	// 	if (!list_empty(&curr->donors_list))
+	// 	{
+	// 		struct thread* next = list_entry(list_begin(&curr->donors_list), struct thread, donors);
+	// 		if (next->priority > curr->priority)
+	// 			curr->priority = next->priority;
+	// 	}
+	// }
 
 	lock->holder = NULL;
 

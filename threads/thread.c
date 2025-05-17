@@ -303,6 +303,17 @@ compare_priority(const struct list_elem* a, const struct list_elem* b, void* aux
 
 	return thread_a->priority > thread_b->priority;
 }
+
+bool
+compare_donor_priority(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
+{
+	// donors_list는 'donors' 멤버를 사용하므로, list_entry도 'donors'를 사용해야 함
+	struct thread* thread_a = list_entry(a, struct thread, donors);
+	struct thread* thread_b = list_entry(b, struct thread, donors);
+
+	return thread_a->priority > thread_b->priority;
+}
+
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void
@@ -327,6 +338,7 @@ thread_set_priority (int new_priority) {
 	enum intr_level old_level = intr_disable ();
 
 	curr->priority = new_priority;
+	// curr->original_priority = new_priority;
 	/* 변경이 필요 없는 경우(즉, yield 할 필요 없는 경우)
 	 * 1. 대기 리스트가 비어있고
 	 * 2. 대기 리스트의 제일 앞이(우선순위 순으로 정렬되었다는 가정 하) 현재 우선순위보다 낮을경우
@@ -441,6 +453,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	// donation 구현 위한 초기화 추가
 	t->original_priority = priority;
 	t->wait_lock = NULL;
+	// 멀티 리스트 구현위한 구조체 내 기부자 리스트 초기화
+	list_init(&t->donors_list);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
