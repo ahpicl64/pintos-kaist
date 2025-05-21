@@ -268,23 +268,18 @@ lock_release (struct lock *lock) {
 			curr->priority = t->priority;
 	}
 
-	// 기존 코드 (항상 우선순위 순으로 정렬되어있다고 가정하고 앞의 리스트 내 요소를 pop으로 지움)
-	// if (!list_empty(&curr->donors_list))
-	// {
-	// 	list_sort(&curr->donors_list, compare_donor_priority, NULL); // 정렬
-	// 	list_pop_front(&curr->donors_list);
-	// 	if (!list_empty(&curr->donors_list))
-	// 	{
-	// 		struct thread* next = list_entry(list_begin(&curr->donors_list), struct thread, donors);
-	// 		if (next->priority > curr->priority)
-	// 			curr->priority = next->priority;
-	// 	}
-	// }
-
 	lock->holder = NULL;
 
 	sema_up (&lock->semaphore);
-	thread_yield();
+	if (!list_empty(&ready_list)) {
+		// ready_list는 우선순위 순으로 정렬되어 있다고 가정합니다 (list_insert_ordered 사용 시).
+		// 따라서 list_front()가 가장 높은 우선순위의 스레드를 가리킵니다.
+		struct thread *next_ready = list_entry(list_front(&ready_list), struct thread, elem);
+		if (curr->priority < next_ready->priority) {
+			thread_yield(); // 여기에 break point를 걸고 테스트해보세요.
+		}
+	}
+
 	intr_set_level (old_level);
 }
 

@@ -23,6 +23,8 @@ enum thread_status {
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
+#define USERPROG // 하단에 정의된 	uint64_t *pml4  Page map level 4  인자를 유효하게 만들기 위해 선언
+
 /* Thread priorities. */
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
@@ -103,7 +105,12 @@ struct thread {
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
-	uint64_t *pml4;                     /* Page map level 4 */
+	/* Page map level 4, 페이지 테이블 최상위(4단계) 엔트리에 대한 포인터
+	 * pml4_create() 함수로 생성되며
+	 * palloc을 통해 물리메모리(커널영역) 내에 프로세스 별 페이지 테이블이 할당됨
+	 * 이 때 상위 절반(256~511 엔트리)는 항상 모든 프로세스 동일한 커널 공간으로 매핑
+	 * -> 시스템콜, 페이지 폴트 등 커널 진입시 커널코드를 실행하기위해 동일하게 매핑 */
+	uint64_t *pml4;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
@@ -119,6 +126,8 @@ struct thread {
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+extern struct list ready_list;
 
 void thread_init (void);
 void thread_start (void);
