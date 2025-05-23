@@ -15,7 +15,7 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame*);
-int sys_exit(int status);
+void sys_exit(int status);
 int sys_write(int fd, const void* buffer, unsigned size);
 static void check_user_addr (const void *buffer);
 static void check_user_buffer (const void *buffer, unsigned size);
@@ -59,6 +59,8 @@ syscall_handler(struct intr_frame* f UNUSED)
     uint64_t arg5 = f->R.r8;
     uint64_t arg6 = f->R.r9;
 
+    intr_enable(); // 인터럽트 활성화
+
     switch (number)
     {
     case SYS_HALT: // no args
@@ -66,14 +68,18 @@ syscall_handler(struct intr_frame* f UNUSED)
         break;
 
     case SYS_EXIT: // int status
-        sys_exit(arg1); // userprog/process.c 구현 필요
+        sys_exit(arg1);
         break;
 
     case SYS_FORK: // const char *thread_name
         // process_fork(name, &f);
         break;
 
+    /* user/syscall.c의 int exec(const char *file)을 통해 호출
+     * 호출함으로써 f->R.rax는 SYS_EXEC의 int 인자가 들어오고
+     * 첫번째 인자인 f->R.rdi는 명령어가 들어옴 */
     case SYS_EXEC: // const char *file
+        f->R.rax = process_exec((const char*)arg1);
         break;
 
     case SYS_WAIT: // pid_t pid
@@ -118,12 +124,12 @@ syscall_handler(struct intr_frame* f UNUSED)
     }
 }
 
-int sys_exit(int status)
+void sys_exit(int status)
 {
+    thread_current()->exit_status = status;
     printf("%s: exit(%d)\n", thread_name(), status);
     thread_exit();
-    // process_exit()을 호출하는게 맞지않을까?
-    return 0;
+    NOT_REACHED();
 }
 
 int sys_write(int fd, const void* buffer, unsigned size)
@@ -140,7 +146,7 @@ static void
 check_user_addr (const void *buffer) {
     struct thread *cur = thread_current ();
     if (!is_user_vaddr (buffer) || pml4_get_page (cur->pml4, buffer) == NULL)
-        process_exit();
+        sys_exit(-1);
 }
 
 static void
@@ -152,8 +158,7 @@ check_user_buffer (const void *buffer, unsigned size)
     {
         if (!is_user_vaddr (ptr) || pml4_get_page (cur->pml4, ptr) == NULL)
         {
-            thread_current()->status = -1;
-            process_exit();
+            sys_exit(-1);
         }
     }
 }

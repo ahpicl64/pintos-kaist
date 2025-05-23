@@ -103,6 +103,8 @@ struct thread {
 	struct list_elem elem;              /* List element. */
 	struct list_elem donors;	// 기부자 리스트를 쓰기위한 element 요소 생성
 
+	int exit_status;
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	/* Page map level 4, 페이지 테이블 최상위(4단계) 엔트리에 대한 포인터
