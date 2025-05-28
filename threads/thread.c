@@ -195,6 +195,23 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
+	/* Project 2 : system call */
+	#ifdef USERPROG
+		t->exit_status = 0;
+
+		t->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGES);	// 새 스레드의 FDT 공간 할당
+		
+		if (t->fdt == NULL)
+			return TID_ERROR;
+
+		t->fd_idx = 3; 
+		t->fdt[0] = STDIN;
+		t->fdt[1] = STDOUT;
+		t->fdt[2] = STDERR;
+		
+		list_push_back(&thread_current()->child_list, &t->child_elem);
+	#endif
+
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -209,7 +226,8 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
-	if((t->priority > thread_current()->priority) && thread_current != idle_thread){
+	/* Project 1 - priority */
+	if((t->priority > thread_current()->priority) && thread_current() != idle_thread){
 		thread_yield();
 	}
 
@@ -246,14 +264,16 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
+
+	/* Project 1 : priority */
+	list_insert_ordered(&ready_list, &t->elem, cmp_priority, NULL);
+	
+	t->status = THREAD_READY;
+  
 	// list_push_back (&ready_list, &t->elem);
 	list_insert_ordered(&ready_list, &t->elem, cmp_priority, NULL);
 	t->status = THREAD_READY;
 
-	/* Moved to thread_create
-	if((t->priority > thread_current()->priority) && thread_current != idle_thread){
-		thread_yield();
-	}*/
 	intr_set_level (old_level);
 }
 
@@ -313,6 +333,10 @@ thread_yield (void) {
 
 	ASSERT (!intr_context ());		// Do Not yield in interrupt context
 
+	/* Project 2 : args 에러 방어 코드 추가 */
+	if(list_empty(&ready_list))
+		return;
+  
 	old_level = intr_disable ();	// Disable interrupt to protect critical section
 	if (curr != idle_thread)
 		// list_push_back (&ready_list, &curr->elem);
@@ -324,6 +348,17 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
+	/* Project 1 : alarm
+	struct thread *curr = thread_current();
+	enum intr_level old_level;
+
+	curr->original_priority = new_priority;
+
+	old_level = intr_disable();
+
+	if(list_empty(&curr->donations) || new_priority > curr->priority)
+		curr->priority = new_priority;
+
 	// thread_current ()->priority = new_priority;
 	struct thread *curr = thread_current();
 	enum intr_level old_level;
@@ -337,6 +372,14 @@ thread_set_priority (int new_priority) {
 			thread_yield();
 		}
 	}
+	intr_set_level(old_level);*/
+  
+	/* Project 1 : Priority */
+	thread_current()->priority = new_priority;
+  thread_current()->original_priority = new_priority;
+  refresh_priority();
+	test_max_priority();
+  
 	intr_set_level(old_level);
 }
 
@@ -433,8 +476,21 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->status = THREAD_BLOCKED;
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
-	t->priority = priority;
+
+	/* Project 1 : priority donation */
+	t->priority = t->original_priority = priority;
+	t->wait_lock = NULL;
+	list_init(&t->donations);
+
 	t->magic = THREAD_MAGIC;
+
+	/* Project 2 : system call */
+	t->running_f = NULL;
+	
+	list_init(&t->child_list);
+	sema_init(&t->fork_sema, 0);
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->exit_sema, 0);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -634,4 +690,76 @@ cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNU
 	struct thread *t_b = list_entry(b, struct thread, elem);
 
 	return t_a->priority > t_b->priority;
+}
+
+/* Priority Donate :
+ * - 락을 대기하고 있는 인자가 있는 경우, 락을 가지고 있는 스레드에게 우선순위를 기부한다
+ * - Nested donation의 경우 재귀 호출의 깊이를 제한한다. 무한 루프 발생 방지. */
+void
+donate_priority (void){
+	int depth;
+	struct thread *curr = thread_current();
+	int priority = curr->priority;
+
+	for(depth = 0; depth < 8; depth++){
+		if(!curr->wait_lock)
+			break;
+		struct thread *holder = curr->wait_lock->holder;
+		if(holder->priority < priority){
+			holder->priority = priority;
+		}
+		curr = holder;
+	}
+}
+
+/* Delete thread from Waiters List : 
+ * - 락을 해지한 후 waiters 리스트에서 스레드를 삭제한다. 
+ * - 리스트를 확인하여 해지할 lock을 보유하고 있는 스레드를 찾아 삭제한다. */
+void
+remove_with_lock (struct lock *lock){
+	struct thread *curr = thread_current();
+	struct list_elem *e;
+
+	for(e = list_begin(&curr->donations); e != list_end(&curr->donations); e = list_next(e)){
+		struct thread *t = list_entry(e, struct thread, donation_elem);
+		if(t->wait_lock == lock)
+			list_remove(&t->donation_elem);
+	}
+}
+
+/* Priority Refresh :
+ * - 우선순위를 원래대로 복구하거나
+ * - 아직 기부자 리스트가 남아있다면, 그 중 가장 높은 우선순위로 재설정한다. */
+void
+refresh_priority(void){
+	struct thread *t = thread_current();
+	t->priority = t->original_priority;
+
+	if(list_empty(&t->donations))
+		return;
+	list_sort(&t->donations, cmp_priority, 0);
+
+	struct list_elem *max_elem = list_front(&t->donations);
+	struct thread *max_thread = list_entry(max_elem, struct thread, donation_elem);
+
+	if(t->priority < max_thread->priority){
+		t->priority = max_thread->priority;
+	}
+}
+
+/* Priority yield :
+ * - 현재 실행중인 스레드 보다 더 높은 우선순위의 스레드가 대기중인 경우 
+ * - 즉시 양보 (yield) 하도록 한다. */
+void
+test_max_priority(void){
+	if(list_empty(&ready_list))
+		return;
+	struct thread *curr = thread_current();
+	struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
+	enum intr_level old_level = intr_disable();
+	if((!intr_context()) && (curr->priority < t->priority)){
+		thread_yield();
+	}
+	intr_set_level(old_level);
+
 }
